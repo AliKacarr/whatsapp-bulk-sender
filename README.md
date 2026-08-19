@@ -1,31 +1,35 @@
 # WhatsApp Toplu Mesaj Gönderici
 
-Excel dosyalarındaki sipariş verilerini otomatik okuyan, dinamik **mesaj şablonlarıyla** müşterilere WhatsApp üzerinden tek tıkla **toplu ve otomatik mesaj** göndermenizi sağlayan modern web tabanlı yönetim paneli.
+Excel dosyalarınızdaki sipariş verilerini otomatik okuyan, Meta **WhatsApp Cloud API** entegrasyonu ve dinamik **mesaj şablonlarıyla** müşterilere tek tıkla **toplu ve otomatik WhatsApp mesajı** göndermenizi sağlayan modern, güvenli web tabanlı yönetim paneli.
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.121+-009688.svg)
 ![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)
-![Baileys](https://img.shields.io/badge/WhatsApp-Baileys-25D366.svg)
+![Express.js](https://img.shields.io/badge/Express.js-4.x-black.svg)
+![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248.svg)
+![WhatsApp Cloud API](https://img.shields.io/badge/WhatsApp-Cloud%20API-25D366.svg)
 ![Docker](https://img.shields.io/badge/Docker-Supported-blue)
 
 ---
 
 ## Öne Çıkan Özellikler
 
-- **Otomatik & Toplu Gönderim:** İster tekli ister filtreleme ve toplu seçim yaparak müşterilerinize şablonlarla otomatik WhatsApp mesajı gönderin.
-- **Excel Sipariş İçe Aktarma:** `.xlsx` ve `.xls` formatındaki sipariş listelerini tek tıkla yükleyin.
-- **Dinamik Mesaj Şablonları:** Müşteri adı, sipariş tutarı, kargo detayları gibi değişkenlerle (`{Ad}`, `{SiparisNo}`) kişiselleştirilmiş mesajlar hazırlayın.
-- **QR Kod ile Kolay WhatsApp Bağlantısı:** Node.js **Baileys** kütüphanesi altyapısıyla WhatsApp hesabınızı anında bağlayın.
-- **Canlı Durum Takibi:** Gönderim süreçlerini (Başarılı, Bekliyor, Hatalı) anlık takip edin.
+- **Meta WhatsApp Cloud API Entegrasyonu:** Resmi Meta Graph API altyapısıyla kesintisiz, hızlı ve güvenli mesaj gönderimi.
+- **Otomatik & Toplu Gönderim:** İster tekli ister filtreleme ve çoklu seçim yaparak müşterilerinize şablonlarla otomatik WhatsApp mesajı gönderin.
+- **Excel Sipariş İçe Aktarma:** `.xlsx` formatındaki sipariş listelerini tek tıkla yükleyin; tüm dosyalar MongoDB ile otomatik senkronize edilir.
+- **Dinamik Meta Şablon Eşleme:** Meta'da onaylı şablon parametrelerini (`{{1}}`, `{{2}}`...) Excel sütunlarıyla görsel olarak eşleştirin.
+- **Kargo Takip Entegrasyonu:** PTT ve Sürat Kargo takip linklerini müşteriye özel olarak tek tıkla otomatik oluşturun.
+- **Kullanıcı Girişi ve Oturum Güvenliği:** MongoDB tabanlı kullanıcı kimlik doğrulaması ve güvenli token oturum yönetimi.
+- **Canlı Webhook Altyapısı:** `X-Hub-Signature-256` doğrulamasıyla güvenli, anında yanıt veren (zero-delay) ve gelen mesajları/durumları (`sent`, `delivered`, `read`, `failed`) yakalayan webhook.
 - **Profil & Şablon Yönetimi:** Farklı mağaza veya iş süreçleri için özel profiller oluşturun.
 
 ---
 
 ## Teknolojiler
 
-- **Backend:** Python (FastAPI, Uvicorn, Pandas)
-- **WhatsApp Servisi:** Node.js, Baileys, Express
-- **Frontend:** HTML, CSS, JavaScript
+- **Backend:** Node.js, Express.js
+- **Veritabanı:** MongoDB
+- **Excel İşleme:** ExcelJS
+- **WhatsApp API:** Meta Graph API v25.0 (Cloud API)
+- **Frontend:** Modern HTML5, Vanilla CSS3 (Dark Glassmorphism), JavaScript
 - **Konteynerizasyon:** Docker
 
 ---
@@ -40,43 +44,47 @@ Excel dosyalarındaki sipariş verilerini otomatik okuyan, dinamik **mesaj şabl
 |:-----------------:|:-------------------:|
 | <img src="public/site_gorselleri/3- Profiller.png" alt="Profiller" width="400"> | <img src="public/site_gorselleri/4- Excel Dosyaları Yönetimi.png" alt="Dosya Yönetimi" width="400"> |
 
-
 ---
 
 ## Hızlı Başlangıç
 
-
-#### WhatsApp Servisi
+#### 1. Bağımlılıkları Yükleyin
 ```bash
-cd whatsapp-service
 npm install
 ```
 
-#### Python Sunucusu 
-```bash
-# Bağımlılıkları yükleyin
-pip install -r public/requirements.txt
+#### 2. Çevre Değişkenlerini (`.env`) Ayarlayın
+Kök dizinde `.env` dosyası oluşturun ve bilgilerinizi ekleyin:
+```env
+MONGODB_URI=mongodb+srv:...
+
+# Meta WhatsApp Cloud API Bilgileri
+WHATSAPP_PHONE_NUMBER_ID=123456789012345
+WHATSAPP_ACCESS_TOKEN=EAAB...
+
+# Webhook Güvenlik Ayarları
+VERIFY_TOKEN=guclu_bir_dogrulama_tokeni
+APP_SECRET=meta_app_secret_kodunuz
 ```
-#### Sunucuyu başlatın
+
+#### 3. Sunucuyu Başlatın
 ```bash
-python public/server.py
+node server.js
 ```
 
-> **Windows Kullanıcıları:** Root dizinindeki `start.bat` dosyasına çift tıklayarak tüm servisleri tek tıkla başlatabilirsiniz.
+> **Windows Kullanıcıları:** Root dizinindeki `start.bat` dosyasına çift tıklayarak uygulamayı başlatabilirsiniz.
 
-> **MacOS Kullanıcıları:** Root dizinindeki `start.command` dosyasına çift tıklayarak tüm servisleri tek tıkla başlatabilirsiniz.
-
-Servisler başladığında tarayıcınızda **`http://127.0.0.1:8000/`** adresini açabilirsiniz.
+Servis başladığında tarayıcınızda otomatik olarak **`http://localhost:8000/`** açılacaktır.
 
 ---
 
 ## Kullanım Rehberi
 
-1. **Bağlantı Kurun:** Arayüzdeki QR kodu WhatsApp mobil uygulamanızdan okutun.
-2. **Profil Seçin veya Oluşturun:** Panel varsayılan olarak **Naturan** profili ile açılır; ihtiyacınıza göre yeni mağaza/iş profilleri oluşturabilir veya değiştirebilirsiniz.
-3. **Excel Yükleyin:** Sipariş listenizi sürükleyip bırakın veya seçin.
-4. **Şablon Oluşturun:** Mesaj taslağınızı dinamik değişkenlerle (`{Ad}`, `{Tutar}` vs.) özelleştirin.
-5. **Gönderin:** Gönderilecek siparişleri seçip otomatik toplu gönderimi başlatın.
+1. **Giriş Yapın:** Varsayılan yönetici bilgileriyle (`admin` / `admin123`) güvenli giriş yapın.
+2. **Profil Seçin:** İhtiyacınıza göre mağaza profili seçin veya yeni bir profil oluşturun.
+3. **Excel Yükleyin:** Sipariş listenizi sürükleyip bırakın veya dosya yöneticisinden yükleyin.
+4. **Şablon & Parametreleri Belirleyin:** Sol panelden Meta şablon adınızı yazın ve parametreleri (`{{1}}`, `{{2}}`...) Excel sütunlarıyla eşleştirip kaydedin.
+5. **Gönderimi Başlatın:** Listeden siparişleri seçin veya **"Tüm Bekleyenlere Oto Mesaj Gönder"** butonuyla toplu gönderimi başlatın.
 
 ---
 

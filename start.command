@@ -2,4 +2,4 @@
 
 cd "$(dirname "$0")"
 
-python3 public/server.py
+node server.js

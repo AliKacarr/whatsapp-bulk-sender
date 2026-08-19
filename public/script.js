@@ -1,3 +1,28 @@
+// ── Kimlik Doğrulama (Auth) Durumu ───────────────────────────────────────────
+let authToken = localStorage.getItem('auth_token') || '';
+let currentUser = null;
+
+// window.fetch sarmalayıcısı (tüm /api isteklerine token ekler ve 401 kontrolü yapar)
+const originalFetch = window.fetch;
+window.fetch = async function (url, options = {}) {
+    options = options || {};
+    options.headers = options.headers || {};
+    if (authToken) {
+        if (options.headers instanceof Headers) {
+            options.headers.set('Authorization', `Bearer ${authToken}`);
+        } else if (Array.isArray(options.headers)) {
+            options.headers.push(['Authorization', `Bearer ${authToken}`]);
+        } else {
+            options.headers['Authorization'] = `Bearer ${authToken}`;
+        }
+    }
+    const response = await originalFetch(url, options);
+    if (response.status === 401 && !String(url).includes('/api/auth/login')) {
+        onUnauthorized();
+    }
+    return response;
+};
+
 // Default Template
 const DEFAULT_TEMPLATE = `Merhaba {Alıcı Adı},
 
@@ -13,6 +38,7 @@ let orders = [];
 let sendingStatuses = {};
 let selectedOrderId = null;
 let statusPollInterval = null;
+let waStatusPollInterval = null;
 let profiles = [];
 let currentProfile = null;
 const SELECTION_SWAP_DELAY_MS = 180;
@@ -98,12 +124,10 @@ async function switchProfile(profileId) {
     sendSelectIds.clear();
     hiddenRestoreSelectIds.clear();
     sendingStatuses = {};
-    const textarea = document.getElementById('template-input');
-    textarea.value = localStorage.getItem(profileTemplateKey()) || DEFAULT_TEMPLATE;
-    autoResize(textarea);
     updateActiveProfileName();
     closeProfileModal();
     await fetchExcelFiles();
+    updatePreview();
     showToast(`${profile.name} profiline geçildi.`, 'success');
 }
 
@@ -150,10 +174,6 @@ async function deleteProfile(profileId) {
     } catch (error) {
         showToast(error.message, 'error');
     }
-}
-
-function isOrderHidden(id) {
-    return sendingStatuses[id] && sendingStatuses[id].hidden === true;
 }
 
 async function deleteOrder(id) {
@@ -884,33 +904,170 @@ async function sendToSelected() {
     }
 }
 
-// Load data on page load
-document.addEventListener("DOMContentLoaded", async () => {
-    // Load saved template from localStorage or use default
+// ── Giriş / Çıkış ve Kimlik Yönetimi ──────────────────────────────────────────
+
+function onUnauthorized() {
+    authToken = '';
+    currentUser = null;
+    localStorage.removeItem('auth_token');
+    showLoginScreen();
+}
+
+function showLoginScreen() {
+    const loginScreen = document.getElementById('login-screen');
+    const header = document.getElementById('main-header');
+    const container = document.getElementById('main-container');
+    if (loginScreen) loginScreen.style.display = 'flex';
+    if (header) header.style.display = 'none';
+    if (container) container.style.display = 'none';
+    if (statusPollInterval) clearInterval(statusPollInterval);
+    if (waStatusPollInterval) clearInterval(waStatusPollInterval);
+    const userInput = document.getElementById('login-username');
+    if (userInput) userInput.focus();
+}
+
+function showMainApp(user) {
+    currentUser = user;
+    const loginScreen = document.getElementById('login-screen');
+    const header = document.getElementById('main-header');
+    const container = document.getElementById('main-container');
+    const userDisplay = document.getElementById('user-display-name');
+
+    if (userDisplay && user) userDisplay.textContent = user.name || user.username;
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (header) header.style.display = '';
+    if (container) container.style.display = '';
+}
+
+async function checkAuthAndInit() {
+    if (!authToken) {
+        showLoginScreen();
+        return;
+    }
+
+    try {
+        const resp = await fetch('/api/auth/me');
+        if (!resp.ok) {
+            onUnauthorized();
+            return;
+        }
+        const data = await resp.json();
+        showMainApp(data.user);
+        await initApp();
+    } catch (e) {
+        onUnauthorized();
+    }
+}
+
+async function handleLogin(e) {
+    if (e) e.preventDefault();
+    const userInput = document.getElementById('login-username');
+    const passInput = document.getElementById('login-password');
+    const errAlert = document.getElementById('login-error-alert');
+    const submitBtn = document.getElementById('login-submit-btn');
+
+    const username = userInput ? userInput.value.trim() : '';
+    const password = passInput ? passInput.value : '';
+
+    if (!username || !password) {
+        showLoginError('Lütfen kullanıcı adı ve şifre girin.');
+        return;
+    }
+
+    if (errAlert) errAlert.style.display = 'none';
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Giriş Yapılıyor...';
+    }
+
+    try {
+        const resp = await originalFetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await resp.json();
+
+        if (resp.ok && data.success) {
+            authToken = data.token;
+            localStorage.setItem('auth_token', authToken);
+            showMainApp(data.user);
+            showToast(`Hoş geldiniz, ${data.user.name || data.user.username}!`, 'success');
+            await initApp();
+        } else {
+            showLoginError(data.detail || 'Giriş başarısız. Kullanıcı adı veya şifre hatalı.');
+        }
+    } catch (err) {
+        showLoginError('Sunucu bağlantı hatası: ' + err.message);
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fas fa-right-to-bracket"></i> Giriş Yap';
+        }
+    }
+}
+
+function showLoginError(msg) {
+    const errAlert = document.getElementById('login-error-alert');
+    if (!errAlert) return;
+    errAlert.innerHTML = `<i class="fas fa-circle-exclamation"></i> <span>${escapeHtml(msg)}</span>`;
+    errAlert.style.display = 'flex';
+}
+
+function togglePasswordVisibility() {
+    const passInput = document.getElementById('login-password');
+    const toggleIcon = document.getElementById('password-toggle-icon');
+    if (!passInput || !toggleIcon) return;
+    if (passInput.type === 'password') {
+        passInput.type = 'text';
+        toggleIcon.className = 'fas fa-eye-slash';
+    } else {
+        passInput.type = 'password';
+        toggleIcon.className = 'fas fa-eye';
+    }
+}
+
+async function logout() {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) { }
+    authToken = '';
+    currentUser = null;
+    localStorage.removeItem('auth_token');
+    showToast('Başarıyla çıkış yapıldı.', 'info');
+    showLoginScreen();
+}
+
+async function initApp() {
     try {
         await loadProfiles();
     } catch (error) {
         showToast(error.message, "error");
         return;
     }
-    const savedTemplate = localStorage.getItem(profileTemplateKey());
-    const ta = document.getElementById("template-input");
-    ta.value = savedTemplate || DEFAULT_TEMPLATE;
-    // Resize after fonts are loaded so measurement is accurate
-    document.fonts.ready.then(() => autoResize(ta));
 
-    // Filtre tercihlerini yükle (varsayılan: her ikisi de işaretli)
+    // Load WhatsApp Meta template settings
+    await loadTemplateSettings();
+
+    // Filtre tercihlerini yükle
     loadFilterPrefs();
 
     // First load excel file list
     if (currentProfile) await fetchExcelFiles();
 
     // Poll sending status every 2 seconds
+    if (statusPollInterval) clearInterval(statusPollInterval);
     statusPollInterval = setInterval(fetchSendingStatuses, 2000);
 
-    // Poll WhatsApp connection status every 4 seconds
+    // Poll WhatsApp connection status every 5 seconds
+    if (waStatusPollInterval) clearInterval(waStatusPollInterval);
     fetchWAStatus();
-    setInterval(fetchWAStatus, 4000);
+    waStatusPollInterval = setInterval(fetchWAStatus, 5000);
+}
+
+// Load data on page load
+document.addEventListener("DOMContentLoaded", async () => {
+    await checkAuthAndInit();
 });
 
 // ── Filtre & Sıralama tercihleri ─────────────────────────────────────────────
@@ -1053,7 +1210,7 @@ async function fetchExcelFiles() {
             sendingStatuses = {};
             selectedOrderId = null;
             renderOrders();
-            renderPlaceholders();
+            renderQuickColumns();
             updateStats();
         }
     } catch (err) {
@@ -1226,61 +1383,169 @@ async function deleteExcelFileFromModal(filename) {
     }
 }
 
-function renderPlaceholders() {
-    const container = document.getElementById("placeholders-container");
-    if (!container) return;
+function getCargoTrackingLink(order) {
+    if (!order) return '';
+    if (order['Kargo Takip Linki']) return order['Kargo Takip Linki'];
+    if (order['Kargo Takip']) return order['Kargo Takip'];
+    const cargoCompany = String(order['Kargo Firması'] || order['Kargo'] || order['Kargo Adı'] || '').toLowerCase();
+    if (cargoCompany.includes('ptt')) {
+        return 'https://www.turkiye.gov.tr/ptt-gonderi-takip';
+    }
+    if (cargoCompany.includes('surat') || cargoCompany.includes('sürat')) {
+        return 'https://suratkargo.com.tr/KargoTakip/';
+    }
+    return '';
+}
+
+let paramRows = []; // [{ id: 'row-1', column: 'Alıcı Adı' }]
+
+function renderQuickColumns() {
+    const wrapper = document.getElementById("quick-columns-wrapper");
+    const container = document.getElementById("quick-columns-container");
+    if (!wrapper || !container) return;
     if (orders.length === 0) {
-        container.innerHTML = `<span style="color: var(--text-muted); font-size: 0.8rem; font-style: italic;">Sütun bulunamadı</span>`;
+        wrapper.style.display = "none";
         return;
     }
 
-    // Get all unique keys from orders (excluding internal fields)
     const sampleOrder = orders[0];
     const keys = Object.keys(sampleOrder).filter(key => key !== "ID" && key !== "Kaynak Dosya");
 
-    // Start with custom virtual placeholders
-    let tagsHtml = `<span class="placeholder-tag" onclick="insertPlaceholder('{ID}')">&#123;ID&#125;</span>`;
-    tagsHtml += `<span class="placeholder-tag" onclick="insertPlaceholder('{Kargo Takip Linki}')">&#123;Kargo Takip Linki&#125;</span>`;
+    wrapper.style.display = "block";
+    let html = keys.map(key => `
+        <span class="placeholder-tag" onclick="quickAddParam('${escapeHtml(key)}')" title="Bu sütunu değişken olarak ekle">
+            <i class="fas fa-plus" style="font-size:0.65rem; margin-right:3px;"></i>${escapeHtml(key)}
+        </span>
+    `).join('');
 
-    // Add excel columns as clickable tags
-    tagsHtml += keys.map(key => {
-        return `<span class="placeholder-tag" onclick="insertPlaceholder('{${key}}')">{${key}}</span>`;
-    }).join('');
+    // Kargo Takip Linki Hızlı Ekleme Butonu
+    html += `
+        <span class="placeholder-tag cargo-tag-dynamic" onclick="quickAddParam('Kargo Takip Linki')" title="Kişi hangi kargo ise (PTT veya Sürat Kargo) takip linkini otomatik ekler">
+            <i class="fas fa-truck-fast" style="font-size:0.65rem; margin-right:3px;"></i>Kargo Takip Linki
+        </span>
+    `;
 
-    container.innerHTML = tagsHtml;
+    container.innerHTML = html;
 }
 
-// Save template when user types
-document.getElementById("template-input").addEventListener("input", (e) => {
-    localStorage.setItem(profileTemplateKey(), e.target.value);
-    autoResize(e.target);
-});
-
-// Auto-resize textarea to fit content
-// scrollHeight excludes borders; +2px compensates for 1px top + 1px bottom border
-function autoResize(el) {
-    el.style.height = "0px";
-    el.style.height = (el.scrollHeight + 2) + "px";
-}
-
-// Insert placeholder at cursor position
-function insertPlaceholder(placeholder) {
-    const textarea = document.getElementById("template-input");
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = textarea.value;
-
-    textarea.value = text.substring(0, start) + placeholder + text.substring(end);
-    textarea.focus();
-    textarea.selectionStart = textarea.selectionEnd = start + placeholder.length;
-
-    // Save to storage and update preview
-    localStorage.setItem(profileTemplateKey(), textarea.value);
-    autoResize(textarea);
+function quickAddParam(columnName) {
+    const emptyRow = paramRows.find(r => !r.column || !r.column.trim());
+    if (emptyRow) {
+        emptyRow.column = columnName;
+        renderParamRows();
+    } else {
+        addParamRow(columnName);
+    }
     updatePreview();
 }
 
-// Fetch orders from FastAPI
+function addParamRow(columnName = '') {
+    const rowId = `param-row-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    paramRows.push({ id: rowId, column: columnName });
+    renderParamRows();
+    updatePreview();
+}
+
+function removeParamRow(rowId) {
+    paramRows = paramRows.filter(r => r.id !== rowId);
+    renderParamRows();
+    updatePreview();
+}
+
+function renderParamRows() {
+    const list = document.getElementById("param-mapping-list");
+    if (!list) return;
+
+    if (paramRows.length === 0) {
+        list.innerHTML = `<div style="color:var(--text-muted); font-size:0.8rem; font-style:italic; padding:0.4rem 0;">Henüz değişken eklenmedi. Meta şablonunuzda &#123;&#123;1&#125;&#125; gibi parametreler varsa 'Değişken Ekle' butonunu kullanın.</div>`;
+        return;
+    }
+
+    list.innerHTML = paramRows.map((row, idx) => `
+        <div class="param-row" id="${row.id}">
+            <span class="param-idx-badge">&#123;&#123;${idx + 1}&#125;&#125;</span>
+            <input type="text" class="param-input" placeholder="Excel Sütun Adı (örn: Alıcı Adı)" value="${escapeHtml(row.column)}"
+                oninput="onParamInput('${row.id}', this.value)">
+            <button class="param-del-btn" onclick="removeParamRow('${row.id}')" title="Kaldır">
+                <i class="fas fa-trash-can"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+function onParamInput(rowId, val) {
+    const row = paramRows.find(r => r.id === rowId);
+    if (row) row.column = val.trim();
+    updatePreview();
+}
+
+function getParamMappingsFromUI() {
+    return paramRows
+        .filter(r => r.column && r.column.trim())
+        .map((r, idx) => ({ column: r.column.trim(), param_index: idx + 1 }));
+}
+
+async function loadTemplateSettings() {
+    try {
+        const resp = await fetch('/api/wa-config');
+        if (!resp.ok) return;
+        const config = await resp.json();
+
+        const nameInput = document.getElementById('template-name-input');
+        const langInput = document.getElementById('template-lang-input');
+        if (nameInput && config.template_name) nameInput.value = config.template_name;
+        if (langInput && config.template_language) langInput.value = config.template_language;
+
+        const mappings = config.parameter_mapping || [];
+        paramRows = mappings.map((m, idx) => ({
+            id: `param-row-${idx + 1}`,
+            column: m.column || ''
+        }));
+        renderParamRows();
+        updatePreview();
+    } catch (e) {
+        console.error("Şablon ayarları yüklenemedi:", e);
+    }
+}
+
+async function saveTemplateSettings() {
+    const nameInput = document.getElementById('template-name-input');
+    const langInput = document.getElementById('template-lang-input');
+    const templateName = nameInput ? nameInput.value.trim() : '';
+    const templateLang = langInput ? langInput.value.trim() || 'tr' : 'tr';
+    const mappings = getParamMappingsFromUI();
+
+    if (!templateName) {
+        showToast("Lütfen Meta şablon adını girin.", "error");
+        if (nameInput) nameInput.focus();
+        return;
+    }
+
+    try {
+        const resp = await fetch('/api/wa-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                template_name: templateName,
+                template_language: templateLang,
+                parameter_mapping: mappings
+            })
+        });
+
+        if (resp.ok) {
+            showToast("WhatsApp şablon ayarları başarıyla kaydedildi.", "success");
+            await fetchWAStatus();
+            updatePreview();
+        } else {
+            const err = await resp.json();
+            showToast("Kayıt hatası: " + (err.detail || "Bilinmeyen hata"), "error");
+        }
+    } catch (e) {
+        showToast("Kayıt hatası: " + e.message, "error");
+    }
+}
+
+// Fetch orders from server
 async function fetchOrders(selectedFile = null) {
     try {
         if (!currentProfile) return;
@@ -1293,7 +1558,7 @@ async function fetchOrders(selectedFile = null) {
 
         await fetchSendingStatuses();
         renderOrders();
-        renderPlaceholders();
+        renderQuickColumns();
         updateStats();
 
         showToast("Siparişler başarıyla yüklendi.", "success");
@@ -1647,93 +1912,99 @@ function selectOrder(cardElOrId, id) {
     }
 }
 
-// Build preview text for specific order
-function buildMessageForOrder(order, template) {
-    if (!order) return "";
-
-    let message = template;
-
-    // Loop through all properties in the order object and replace placeholders
-    Object.keys(order).forEach(key => {
-        if (key === "ID") {
-            // Show original ID in placeholder replacement
-            const originalId = order.ID.split('|')[1] || order.ID;
-            const regex = new RegExp(`{ID}`, 'g');
-            message = message.replace(regex, originalId);
-        } else {
-            const val = order[key] !== undefined && order[key] !== null ? order[key] : "";
-            const regex = new RegExp(`{${key}}`, 'g');
-            message = message.replace(regex, val);
-        }
-    });
-
-    // Fallback templates for common aliases
-    const orderNo = order["Sipariş No"] || order["Sipari No"] || "";
-    message = message.replace(/{Sipariş No}/g, orderNo);
-    message = message.replace(/{Sipari No}/g, orderNo);
-
-    const receiverName = order["Alıcı Adı"] || order["Alc Ad"] || "";
-    message = message.replace(/{Alıcı Adı}/g, receiverName);
-
-    const trackingCode = order["Kargo Firması Takip Kodu"] || order["Kargo Takip Kodu"] || "";
-    message = message.replace(/{Kargo Firması Takip Kodu}/g, trackingCode);
-    message = message.replace(/{Takip Kodu}/g, trackingCode);
-
-    // Kargo firmasına göre otomatik takip linki
-    const kargoFirmasi = (order["Kargo Firması"] || "").toString().toLowerCase();
-    let kargoTakipLinki = "";
-    if (kargoFirmasi.includes("ptt")) {
-        kargoTakipLinki = "https://www.ptt.gov.tr/";
-    } else if (kargoFirmasi.includes("sürat") || kargoFirmasi.includes("surat")) {
-        kargoTakipLinki = "https://suratkargo.com.tr/KargoTakip/";
-    }
-    message = message.replace(/{Kargo Takip Linki}/g, kargoTakipLinki);
-
-    return message;
-}
-
 // Update preview pane
 function showEmptyPreview() {
     const previewBox = document.getElementById("preview-box");
+    if (!previewBox) return;
     previewBox.classList.add("empty");
-    previewBox.innerHTML = `<div class="preview-empty">Önizlemek için sağdan herhangi bir sipariş seçin.</div>`;
+    previewBox.innerHTML = `<div class="preview-empty">Önizlemek için sağdaki listeden bir sipariş seçin.</div>`;
 }
 
 function updatePreview() {
     const previewBox = document.getElementById("preview-box");
+    if (!previewBox) return;
+
     if (!selectedOrderId) {
         showEmptyPreview();
         return;
     }
 
     const order = orders.find(o => o.ID === selectedOrderId);
-    if (!order) return;
+    if (!order) {
+        showEmptyPreview();
+        return;
+    }
 
-    const template = document.getElementById("template-input").value;
-    const msg = buildMessageForOrder(order, template);
+    const templateName = document.getElementById('template-name-input')?.value.trim() || '(Şablon Adı Belirtilmedi)';
+    const templateLang = document.getElementById('template-lang-input')?.value.trim() || 'tr';
+    const mappings = getParamMappingsFromUI();
 
     previewBox.classList.remove("empty");
-    previewBox.innerHTML = `<div class="preview-badge">Sipariş #${order["Sipariş No"] || order["Sipari No"]} Önizleme</div>
-<div>${escapeHtml(msg)}</div>`;
+
+    const orderNo = order["Sipariş No"] || order["Sipari No"] || order.ID.split('|')[2] || "";
+    const receiverName = order["Alıcı Adı"] || order["Alc Ad"] || "Müşteri";
+    const phone = order["Alıcı Telefon"] || "";
+
+    const paramsHtml = mappings.length > 0
+        ? mappings.map((p, idx) => {
+            let val = order[p.column];
+            if ((val === undefined || val === null || val === '') && (p.column === 'Kargo Takip Linki' || p.column === 'Kargo Takip')) {
+                val = getCargoTrackingLink(order);
+            } else if (p.column === 'PTT Takip Linki') {
+                val = 'https://www.turkiye.gov.tr/ptt-gonderi-takip';
+            } else if (p.column === 'Sürat Kargo Takip Linki' || p.column === 'Surat Kargo Takip Linki') {
+                val = 'https://suratkargo.com.tr/KargoTakip/';
+            }
+            if (val === undefined || val === null) val = '';
+            return `
+                <div class="wa-preview-param-row">
+                    <span class="wa-param-tag">&#123;&#123;${idx + 1}&#125;&#125;</span>
+                    <span class="wa-param-col">${escapeHtml(p.column)}:</span>
+                    <strong class="wa-param-val">${escapeHtml(String(val))}</strong>
+                </div>
+            `;
+        }).join('')
+        : `<div style="color:var(--text-muted); font-size:0.8rem; font-style:italic; padding:0.25rem 0;">Parametre tanımlanmadı (parametresiz şablon).</div>`;
+
+    previewBox.innerHTML = `
+        <div class="wa-preview-card">
+            <div class="wa-preview-header">
+                <div class="wa-preview-tmpl-name">
+                    <i class="fab fa-whatsapp"></i>
+                    <span class="tmpl-title">${escapeHtml(templateName)}</span>
+                    <span class="tmpl-lang">[${escapeHtml(templateLang)}]</span>
+                </div>
+                <span class="wa-preview-order-badge">#${escapeHtml(orderNo)}</span>
+            </div>
+            <div class="wa-preview-body">
+                <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.1rem;">
+                    Gönderilecek Değişkenler:
+                </div>
+                ${paramsHtml}
+            </div>
+            <div class="wa-preview-footer">
+                <i class="fas fa-user" style="color:var(--text-muted); font-size:0.85rem; margin-left:5px;"></i>
+                <strong style="color:var(--text-main);">${escapeHtml(receiverName)}</strong> 
+                <span style="color:var(--text-muted); font-size:0.8rem;">(${escapeHtml(String(phone))})</span>
+            </div>
+        </div>
+    `;
 }
 
-function escapeHtml(text) {
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
-// WhatsApp bağlantısı kontrolü - bağlı değilse paneli açar
-function checkWAConnectionOrOpenModal() {
-    if (waState !== 'connected') {
-        showToast("Gönderim yapabilmek için önce WhatsApp bağlantısı kurmalısınız.", "error");
-        openQRModal();
+// WhatsApp bağlantısı kontrolü
+function checkWAConnection() {
+    const templateName = document.getElementById('template-name-input')?.value.trim();
+    if (!templateName) {
+        showToast("Gönderim yapabilmek için lütfen sol panelden Meta Şablon Adını girin ve Kaydedin.", "error");
+        document.getElementById('template-name-input')?.focus();
         return false;
     }
     return true;
+}
+
+// Geriye uyumluluk stub
+function checkWAConnectionOrOpenModal() {
+    return checkWAConnection();
 }
 
 // Filter and Search trigger
@@ -1755,15 +2026,28 @@ function updateStats() {
 
 // Send manual message (opens new tab with pre-filled WhatsApp link)
 async function sendManual(id) {
-    if (!checkWAConnectionOrOpenModal()) return;
-
     const order = orders.find(o => o.ID === id);
     if (!order) return;
 
-    const template = document.getElementById("template-input").value;
-    const message = buildMessageForOrder(order, template);
+    const templateName = document.getElementById('template-name-input')?.value.trim() || '';
+    const mappings = getParamMappingsFromUI();
 
-    // Format phone (web api wants numbers only with country code)
+    let messageLines = [];
+    if (templateName) messageLines.push(`[${templateName}]`);
+    mappings.forEach(m => {
+        let val = order[m.column];
+        if ((val === undefined || val === null || val === '') && (m.column === 'Kargo Takip Linki' || m.column === 'Kargo Takip')) {
+            val = getCargoTrackingLink(order);
+        } else if (m.column === 'PTT Takip Linki') {
+            val = 'https://www.turkiye.gov.tr/ptt-gonderi-takip';
+        } else if (m.column === 'Sürat Kargo Takip Linki' || m.column === 'Surat Kargo Takip Linki') {
+            val = 'https://suratkargo.com.tr/KargoTakip/';
+        }
+        if (val === undefined || val === null) val = '';
+        messageLines.push(`${m.column}: ${val}`);
+    });
+    const message = messageLines.join('\n');
+
     let phone = (order["Alıcı Telefon"] || "").toString().replace(/\D/g, '');
     if (!phone.startsWith('90') && phone.length === 10) {
         phone = '90' + phone;
@@ -1772,15 +2056,12 @@ async function sendManual(id) {
     }
 
     const url = `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
-
     window.open(url, '_blank');
 
-    // Mark as sent both locally and on the backend so it persists
     sendingStatuses[id] = { status: "sent", error: "" };
     updateStatusIndicators();
     updateStats();
 
-    // Otomatik gizle ayarı açıksa gönderilen siparışi gizle
     if (isAutoHideSentEnabled()) {
         await deleteOrder(id);
     }
@@ -1792,8 +2073,7 @@ async function sendManual(id) {
             body: JSON.stringify({
                 id: order.ID,
                 profile: currentProfile.id,
-                phone: order["Alıcı Telefon"].toString(),
-                message: message,
+                phone: order["Alıcı Telefon"] ? order["Alıcı Telefon"].toString() : "",
                 order: order
             })
         });
@@ -1804,10 +2084,10 @@ async function sendManual(id) {
     showToast(`${order["Alıcı Adı"]} için WhatsApp Web sekmesi açıldı.`, "success");
 }
 
-// Send automatically using Python backend
+// Send automatically using WhatsApp Cloud API
 async function sendAuto(id) {
     const isSingleSend = !isBulkSending;
-    if (isSingleSend && !checkWAConnectionOrOpenModal()) return;
+    if (isSingleSend && !checkWAConnection()) return;
 
     const order = orders.find(o => o.ID === id);
     if (!order) return;
@@ -1816,11 +2096,7 @@ async function sendAuto(id) {
         showBulkProgress(1, 1);
     }
 
-    const template = document.getElementById("template-input").value;
-    const message = buildMessageForOrder(order, template);
-
     try {
-        // Instantly update UI status to sending
         sendingStatuses[id] = { status: "sending", error: "" };
         updateStatusIndicators();
 
@@ -1830,8 +2106,8 @@ async function sendAuto(id) {
             body: JSON.stringify({
                 id: order.ID,
                 profile: currentProfile.id,
-                phone: order["Alıcı Telefon"].toString(),
-                message: message,
+                phone: order["Alıcı Telefon"] !== undefined ? order["Alıcı Telefon"].toString() : "",
+                message: "",
                 order: order
             })
         });
@@ -1977,23 +2253,23 @@ async function startBulkSend(useSelection = false) {
     }
 }
 
-function sendToSelected() {
-    startBulkSend(true);
-}
-
 // Toast Helper
 function showToast(message, type = "success") {
     const toast = document.getElementById("toast");
     const icon = document.getElementById("toast-icon");
     const msgSpan = document.getElementById("toast-message");
 
+    if (!toast || !msgSpan) return;
+
     msgSpan.innerText = message;
 
     toast.className = "toast show " + type;
-    if (type === "success") {
-        icon.className = "fas fa-circle-check";
-    } else {
-        icon.className = "fas fa-circle-exclamation";
+    if (icon) {
+        if (type === "success") {
+            icon.className = "fas fa-circle-check";
+        } else {
+            icon.className = "fas fa-circle-exclamation";
+        }
     }
 
     setTimeout(() => {
@@ -2001,41 +2277,20 @@ function showToast(message, type = "success") {
     }, 4000);
 }
 
-// ── WhatsApp Bağlantı Durumu ────────────────────────────────────────
+// ── WhatsApp Cloud API Durum & Bağlantı Testi ─────────────────────────────────
 
-let waUserPhone = null;
-let isLoggingOut = false;
+waState = 'not_configured';
 
 async function fetchWAStatus() {
-    if (isLoggingOut) {
-        updateWAStatusUI('logging_out');
-        return;
-    }
     try {
         const resp = await fetch('/api/whatsapp-status');
         const data = await resp.json();
-        if (isLoggingOut) return;
-        const newState = data.state || 'disconnected';
+        const newState = data.state || 'not_configured';
         waState = newState;
-        waUserPhone = data.user || null;
         updateWAStatusUI(newState);
-
-        // Modal açık ise içeriğini güncelle (otomatik açma yapılmaz!)
-        if (document.getElementById('wa-qr-modal').classList.contains('open')) {
-            refreshQRModalContent();
-        }
     } catch (e) {
-        if (isLoggingOut) {
-            updateWAStatusUI('logging_out');
-            return;
-        }
-        waState = 'service_offline';
-        waUserPhone = null;
-        updateWAStatusUI('service_offline');
-
-        if (document.getElementById('wa-qr-modal').classList.contains('open')) {
-            refreshQRModalContent();
-        }
+        waState = 'not_configured';
+        updateWAStatusUI('not_configured');
     }
 }
 
@@ -2050,166 +2305,42 @@ function updateWAStatusUI(state) {
 
     const labels = {
         connected: 'Bağlı',
-        qr_pending: 'QR Bekleniyor',
-        connecting: 'Bağlanıyor',
-        logging_out: 'Çıkış Yapılıyor',
-        disconnected: 'Bağlı Değil',
-        service_offline: 'Servis Kapalı'
+        not_configured: 'Ayar Gerekli',
+        service_offline: 'Sunucu Kapalı'
     };
     text.textContent = labels[state] || state;
 }
 
-async function logoutWhatsApp() {
-    if (!confirm("WhatsApp oturumu kapatılacak. Devam edilsin mi?")) return;
-    isLoggingOut = true;
-    waState = 'logging_out';
-    updateWAStatusUI('logging_out');
-    refreshQRModalContent();
-
+async function testWAConnection() {
+    showToast("WhatsApp API bağlantısı test ediliyor...", "info");
     try {
-        const res = await fetch('/api/whatsapp-logout', { method: 'POST' });
-        if (res.ok) {
-            showToast("WhatsApp oturumu başarıyla kapatıldı.", "success");
-        } else {
-            showToast("Oturum kapatılırken uyarı alındı.", "info");
-        }
-    } catch (e) {
-        showToast("Oturum kapatılırken hata: " + e.message, "error");
-    } finally {
-        isLoggingOut = false;
-        waState = 'disconnected';
-        waUserPhone = null;
-        updateWAStatusUI('disconnected');
-        document.getElementById('wa-qr-modal')?.classList.remove('open');
-    }
-}
-
-async function openQRModal() {
-    if (isLoggingOut) return;
-    document.getElementById('wa-qr-modal').classList.add('open');
-    if (waState === 'disconnected') {
-        try {
-            await fetch('/api/whatsapp-connect', { method: 'POST' });
-        } catch (_) { }
-    }
-    await refreshQRModalContent();
-}
-
-async function closeQRModal(event) {
-    if (isLoggingOut) return;
-    if (event && event.target !== event.currentTarget) return;
-    document.getElementById('wa-qr-modal').classList.remove('open');
-
-    // Oturum kurulmadan panel kapatıldıysa bağlantı/QR sürecini iptal et
-    if (waState !== 'connected') {
-        waState = 'disconnected';
-        updateWAStatusUI('disconnected');
-        try {
-            await fetch('/api/whatsapp-cancel', { method: 'POST' });
-        } catch (_) { }
-    }
-}
-
-let lastQRDataUrl = null; // Önceki QR resmi — değişmemişse DOM'u yeniden çizme
-
-async function refreshQRModalContent() {
-    const qrContent = document.getElementById('wa-qr-content');
-    const connectedContent = document.getElementById('wa-connected-content');
-    const offlineContent = document.getElementById('wa-offline-content');
-
-    if (waState === 'connected') {
-        qrContent.style.display = 'none';
-        offlineContent.style.display = 'none';
-        connectedContent.style.display = 'block';
-        const phoneEl = document.getElementById('wa-connected-phone');
-        if (phoneEl) {
-            phoneEl.textContent = waUserPhone ? waUserPhone : '';
-        }
-        lastQRDataUrl = null;
-        return;
-    }
-
-    if (waState === 'logging_out') {
-        qrContent.style.display = 'none';
-        connectedContent.style.display = 'none';
-        offlineContent.style.display = 'block';
-        const titleEl = offlineContent.querySelector('.wa-connected-text');
-        const descEl = offlineContent.querySelector('p');
-        if (titleEl) titleEl.textContent = 'Çıkış Yapılıyor...';
-        if (descEl) descEl.textContent = 'WhatsApp oturum dosyaları temizleniyor, lütfen bekleyin...';
-        lastQRDataUrl = null;
-        return;
-    }
-
-    if (waState === 'service_offline') {
-        qrContent.style.display = 'none';
-        connectedContent.style.display = 'none';
-        offlineContent.style.display = 'block';
-        const titleEl = offlineContent.querySelector('.wa-connected-text');
-        const descEl = offlineContent.querySelector('p');
-        if (titleEl) titleEl.textContent = 'Servis Kapalı';
-        if (descEl) descEl.textContent = 'Sunucuyu yeniden başlatın veya bekleyin.';
-        lastQRDataUrl = null;
-        return;
-    }
-
-    if (waState === 'disconnected' && !lastQRDataUrl) {
-        qrContent.style.display = 'none';
-        connectedContent.style.display = 'none';
-        offlineContent.style.display = 'block';
-        const titleEl = offlineContent.querySelector('.wa-connected-text');
-        const descEl = offlineContent.querySelector('p');
-        if (titleEl) titleEl.textContent = 'Bağlı Değil';
-        if (descEl) descEl.textContent = 'Bağlanmak için butona tıklayın.';
-        return;
-    }
-
-    // qr_pending veya connecting — QR çek
-    connectedContent.style.display = 'none';
-    offlineContent.style.display = 'none';
-    qrContent.style.display = 'block';
-
-    try {
-        const resp = await fetch('/api/whatsapp-qr');
+        const resp = await fetch('/api/wa-config/test', { method: 'POST' });
         const data = await resp.json();
-
-        if (data.qr) {
-            // Sadece QR değiştiyse DOM'u yeniden çiz
-            if (data.qr !== lastQRDataUrl) {
-                lastQRDataUrl = data.qr;
-                qrContent.innerHTML = `
-                        <img src="${data.qr}" class="wa-qr-img" alt="WhatsApp QR Kod">
-                        <div class="wa-qr-hint">
-                            WhatsApp → Bağlı Cihazlar → Cihaz Ekle<br>
-                            ile bu QR kodu okutun.
-                        </div>`;
-            }
-            // QR aynıysa hiçbir şey yapma — titreme olmaz
-        } else if (data.state === 'connected' || waState === 'connected') {
-            qrContent.style.display = 'none';
-            connectedContent.style.display = 'block';
-            lastQRDataUrl = null;
+        if (data.success) {
+            const phoneInfo = data.phone_info || {};
+            const displayPhone = phoneInfo.display_phone_number || phoneInfo.phone_number || '';
+            const verifiedName = phoneInfo.verified_name ? ` (${phoneInfo.verified_name})` : '';
+            showToast(`WhatsApp Cloud API Bağlantısı Başarılı!${displayPhone ? ' Numara: ' + displayPhone + verifiedName : ''}`, "success");
+            waState = 'connected';
+            updateWAStatusUI('connected');
         } else {
-            // Henüz QR hazır değil — ama önceşi QR varsa onu koru
-            if (!lastQRDataUrl) {
-                qrContent.innerHTML = '<div class="wa-qr-loading"><i class="fas fa-circle-notch fa-spin"></i> QR hazırlanıyor, lütfen bekleyin...</div>';
-            }
-            // Önceşi QR varsa onu göstermeye devam et (değiştirme)
+            showToast(`API Hatası: ${data.error || 'Bağlantı kurulamadı.'}`, "error");
+            waState = 'not_configured';
+            updateWAStatusUI('not_configured');
         }
     } catch (e) {
-        if (!lastQRDataUrl) {
-            qrContent.innerHTML = '<div class="wa-qr-loading" style="color:var(--accent-red);">QR alınamadı.</div>';
-        }
+        showToast("Bağlantı test hatası: " + e.message, "error");
+        waState = 'not_configured';
+        updateWAStatusUI('not_configured');
     }
 }
 
+// Geriye uyumluluk stub'ları
+function openWAConfigModal() { testWAConnection(); }
+function openQRModal() { testWAConnection(); }
+function closeWAConfigModal() { }
+function closeQRModal() { }
 async function logoutWhatsApp() {
-    if (!confirm('WhatsApp oturumunu kapatmak istediğinize emin misiniz? Tekrar bağlanmak için QR kodu yeniden okutmanız gerekecek.')) return;
-    try {
-        await fetch('/api/whatsapp-logout', { method: 'POST' });
-        showToast('WhatsApp oturumu kapatıldı.', 'success');
-        closeQRModal();
-    } catch (e) {
-        showToast('Oturum kapatılamadı.', 'error');
-    }
+    showToast('Cloud API modunda oturum kavramı yoktur. Kimlik bilgileri .env dosyasından yönetilir.', 'info');
 }
+

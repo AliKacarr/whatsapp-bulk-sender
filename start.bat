@@ -8,6 +8,6 @@ echo    Naturan WhatsApp Siparis Bildirim Paneli Baslatiliyor...
 echo =============================================================
 echo.
 
-python public\server.py
+node server.js
 
 pause

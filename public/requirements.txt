@@ -5,5 +5,6 @@ openpyxl>=3.1.5
 httpx
 pydantic>=2.12.4
 python-multipart
-pywhatkit>=5.4
-pyautogui>=0.9.54
+motor>=3.3.2
+pymongo>=4.6.0
+python-dotenv>=1.0.0

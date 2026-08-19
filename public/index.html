@@ -18,7 +18,51 @@
 
 <body>
 
-    <header>
+    <!-- Login Screen Overlay -->
+    <div id="login-screen" class="login-screen">
+        <div class="login-backdrop-glow"></div>
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-icon-box">
+                    <i class="fab fa-whatsapp"></i>
+                </div>
+                <h2>Sipariş Bildirim Paneli</h2>
+                <p>Devam etmek için lütfen giriş yapın</p>
+            </div>
+
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <div id="login-error-alert" class="login-error-alert" style="display:none;"></div>
+
+                <div class="login-input-group">
+                    <label for="login-username">Kullanıcı Adı</label>
+                    <div class="login-input-wrapper">
+                        <i class="fas fa-user input-icon"></i>
+                        <input id="login-username" type="text" placeholder="Kullanıcı adınızı girin" required
+                            autocomplete="username" autofocus>
+                    </div>
+                </div>
+
+                <div class="login-input-group">
+                    <label for="login-password">Şifre</label>
+                    <div class="login-input-wrapper">
+                        <i class="fas fa-lock input-icon"></i>
+                        <input id="login-password" type="password" placeholder="Şifrenizi girin" required
+                            autocomplete="current-password">
+                        <button type="button" class="btn-toggle-password" onclick="togglePasswordVisibility()"
+                            tabindex="-1">
+                            <i id="password-toggle-icon" class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <button id="login-submit-btn" type="submit" class="btn-login-submit">
+                    <i class="fas fa-right-to-bracket"></i> Giriş Yap
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <header id="main-header">
         <div class="header-left" style="display:flex; align-items:center; gap:1.25rem;">
             <div class="header-logo">
                 <i class="fab fa-whatsapp"></i>
@@ -58,50 +102,106 @@
                 <button class="btn btn-secondary" onclick="refreshData()" title="Yenile">
                     <i class="fas fa-arrows-rotate"></i>
                 </button>
-                <button id="wa-status-btn" class="btn btn-secondary wa-status-btn" onclick="openQRModal()"
-                    title="WhatsApp bağlantı durumu">
+                <button id="wa-status-btn" class="btn btn-secondary wa-status-btn" onclick="testWAConnection()"
+                    title="WhatsApp Cloud API Bağlantısını Test Et">
                     <i class="fab fa-whatsapp"></i>
                     WhatsApp: <span class="value" id="wa-status-text"></span>
+                </button>
+                <button class="btn btn-secondary btn-logout" onclick="logout()" title="Güvenli Çıkış Yap">
+                    <i class="fas fa-right-from-bracket"></i>
                 </button>
             </div>
         </div>
     </header>
 
-    <div class="container">
+    <div class="container" id="main-container">
 
         <!-- Left Side: Editor & Controls -->
         <div class="editor-panel">
 
+            <!-- Meta Şablon Tasarımcısı -->
             <div class="card">
-                <div class="card-title">
-                    <i class="fas fa-pen-to-square"></i>
-                    Şablon Tasarımcısı
+                <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="display:flex; align-items:center; gap:0.6rem;">
+                        <i class="fab fa-whatsapp" style="color:var(--primary);"></i>
+                        <span>Meta Şablon Ayarları</span>
+                    </div>
+                    <button class="btn-save-template" onclick="saveTemplateSettings()">
+                        <i class="fas fa-floppy-disk"></i> Kaydet
+                    </button>
                 </div>
 
-                <div class="template-editor">
-                    <label for="template-input">Mesaj Şablonu</label>
-                    <textarea id="template-input" oninput="updatePreview()"
-                        placeholder="Mesajınızı yazın..."></textarea>
+                <div class="template-editor" style="display:flex; flex-direction:column; gap:1rem;">
+                    <!-- Şablon Adı & Dil -->
+                    <div style="display:grid; grid-template-columns: 1fr 90px; gap:0.6rem;">
+                        <div>
+                            <label for="template-name-input"
+                                style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.35rem; display:block; letter-spacing:0.4px;">
+                                Şablon Adı (Meta)
+                            </label>
+                            <input id="template-name-input" type="text" class="search-input"
+                                style="width:100%; border-radius:8px; padding:0.6rem 0.8rem; background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); outline:none;"
+                                placeholder="Örn: kargo_bilgilendirme_v1" oninput="updatePreview()">
+                        </div>
+                        <div>
+                            <label for="template-lang-input"
+                                style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.35rem; display:block; letter-spacing:0.4px;">
+                                Dil Kodu
+                            </label>
+                            <input id="template-lang-input" type="text" class="search-input"
+                                style="width:100%; border-radius:8px; padding:0.6rem 0.8rem; background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); outline:none;"
+                                placeholder="tr" value="tr" oninput="updatePreview()">
+                        </div>
+                    </div>
 
-                    <label>Eklenebilir Bilgiler (Tıklayın)</label>
-                    <div class="placeholders-container" id="placeholders-container">
-                        <!-- Dynamic placeholders will be loaded here -->
-                        <span class="placeholders-loading">Yükleniyor...</span>
+                    <!-- Parametreler (Seçenekler) -->
+                    <div>
+                        <div
+                            style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                            <label
+                                style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.4px;">
+                                Değişkenler ({{1}}, {{2}}...)
+                            </label>
+                            <button class="btn btn-secondary"
+                                style="padding:0.25rem 0.6rem; font-size:0.75rem; border-radius:6px;"
+                                onclick="addParamRow()">
+                                <i class="fas fa-plus"></i> Değişken Ekle
+                            </button>
+                        </div>
+
+                        <div id="param-mapping-list" style="display:flex; flex-direction:column; gap:0.5rem;">
+                            <!-- Parametre satırları buraya gelecek -->
+                        </div>
+                        <div style="font-size:0.73rem; color:var(--text-muted); margin-top:0.45rem; line-height:1.4;">
+                            Meta şablonunuzdaki <strong>&#123;&#123;1&#125;&#125;</strong>,
+                            <strong>&#123;&#123;2&#125;&#125;</strong> parametreleri için Excel sütun adını yazın veya
+                            seçin.
+                        </div>
+                    </div>
+
+                    <!-- Excel Sütunları Hızlı Seçim -->
+                    <div id="quick-columns-wrapper" style="display:none;">
+                        <label
+                            style="font-size:0.72rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:0.35rem; letter-spacing:0.4px;">
+                            Excel Sütunları (Hızlı Ekle)
+                        </label>
+                        <div class="placeholders-container" id="quick-columns-container">
+                            <!-- Clickable excel column tags -->
+                        </div>
                     </div>
                 </div>
             </div>
 
+            <!-- Mesaj Önizleme -->
             <div class="card">
                 <div class="card-title">
                     <i class="fas fa-eye"></i>
-                    Mesaj Önizleme
+                    Şablon Önizleme
                 </div>
                 <div id="preview-box" class="preview-container empty">
-                    <div class="preview-empty">Önizlemek için sağdan herhangi bir sipariş seçin.</div>
+                    <div class="preview-empty">Önizlemek için sağdaki listeden bir sipariş seçin.</div>
                 </div>
             </div>
-
-
 
         </div>
 
@@ -230,37 +330,6 @@
         </div>
     </div>
 
-    <!-- WhatsApp QR Modal -->
-    <div class="wa-modal-backdrop" id="wa-qr-modal" onclick="closeQRModal(event)">
-        <div class="wa-modal">
-            <div class="wa-modal-header">
-                <div class="wa-modal-title"><i class="fab fa-whatsapp"></i> WhatsApp Bağlantısı</div>
-                <button class="profile-close" onclick="closeQRModal()" title="Kapat"><i
-                        class="fas fa-xmark"></i></button>
-            </div>
-            <div class="wa-modal-body">
-                <div id="wa-qr-content">
-                    <div class="wa-qr-loading"><i class="fas fa-circle-notch fa-spin"></i> QR kod bekleniyor...</div>
-                </div>
-                <div id="wa-connected-content" style="display:none;">
-                    <div class="wa-connected-icon"><i class="fab fa-whatsapp"></i></div>
-                    <div class="wa-connected-text">WhatsApp bağlı</div>
-                    <div id="wa-connected-phone"
-                        style="color:var(--primary); font-size:1.05rem; font-weight:800; margin-top:0.5rem; letter-spacing:0.5px;">
-                    </div>
-                    <button class="btn btn-secondary btn-danger" onclick="logoutWhatsApp()" style="margin-top:1.25rem;">
-                        <i class="fas fa-right-from-bracket"></i> Oturumu Kapat
-                    </button>
-                </div>
-                <div id="wa-offline-content" style="display:none;">
-                    <div class="wa-offline-icon"><i class="fas fa-plug-circle-xmark"></i></div>
-                    <div class="wa-connected-text" style="color:var(--accent-red);">Çıkış Yapıldı</div>
-                    <p style="color:var(--text-muted); font-size:0.85rem; margin-top:0.5rem;">WhatsApp oturumu kapalı.
-                    </p>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- Excel Manager Modal -->
     <div class="profile-modal-backdrop" id="excel-manager-modal" onclick="closeExcelManagerModal(event)">
