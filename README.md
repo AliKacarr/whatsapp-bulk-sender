@@ -13,13 +13,13 @@ Excel dosyalarınızdaki sipariş verilerini otomatik okuyan, Meta **WhatsApp Cl
 ## Öne Çıkan Özellikler
 
 - **Meta WhatsApp Cloud API Entegrasyonu:** Resmi Meta Graph API altyapısıyla kesintisiz, hızlı ve güvenli mesaj gönderimi.
-- **Otomatik & Toplu Gönderim:** İster tekli ister filtreleme ve çoklu seçim yaparak müşterilerinize şablonlarla otomatik WhatsApp mesajı gönderin.
+- **Canlı Webhook Altyapısı:** `X-Hub-Signature-256` doğrulamasıyla güvenli, anında yanıt veren (zero-delay) ve gelen mesajları/durumları (`sent`, `delivered`, `read`, `failed`) yakalayan webhook.
+- **Profil & Şablon Yönetimi:** Farklı mağaza veya iş süreçleri için özel profiller oluşturun.
+- **Mesaj Gönderimi:** Gelişmiş filtreleme ve çoklu seçim özellikleriyle, onaylı Meta şablonlarınız üzerinden müşterilerinize tekli veya toplu otomatik WhatsApp mesajları gönderin.
 - **Excel Sipariş İçe Aktarma:** `.xlsx` formatındaki sipariş listelerini tek tıkla yükleyin; tüm dosyalar MongoDB ile otomatik senkronize edilir.
 - **Dinamik Meta Şablon Eşleme:** Meta'da onaylı şablon parametrelerini (`{{1}}`, `{{2}}`...) Excel sütunlarıyla görsel olarak eşleştirin.
 - **Kargo Takip Entegrasyonu:** PTT ve Sürat Kargo takip linklerini müşteriye özel olarak tek tıkla otomatik oluşturun.
 - **Kullanıcı Girişi ve Oturum Güvenliği:** MongoDB tabanlı kullanıcı kimlik doğrulaması ve güvenli token oturum yönetimi.
-- **Canlı Webhook Altyapısı:** `X-Hub-Signature-256` doğrulamasıyla güvenli, anında yanıt veren (zero-delay) ve gelen mesajları/durumları (`sent`, `delivered`, `read`, `failed`) yakalayan webhook.
-- **Profil & Şablon Yönetimi:** Farklı mağaza veya iş süreçleri için özel profiller oluşturun.
 
 ---
 
